@@ -5,6 +5,7 @@ This document describes the observability stack implemented for the Book Managem
 ## Overview
 
 The application has comprehensive observability including:
+
 - **Logs** - Application logs shipped to Grafana Loki
 - **Traces** - Distributed tracing via OpenTelemetry and Grafana Beyla (eBPF)
 - **Profiles** - Continuous profiling via Pyroscope
@@ -71,13 +72,13 @@ The application uses an event-driven architecture where the API only publishes e
 
 ### Benefits of This Architecture
 
-| Benefit | Description |
-|---------|-------------|
-| **No Data Duplication** | Only the worker writes to the database |
-| **Eventual Consistency** | Events are processed asynchronously |
-| **Scalability** | Worker can be scaled independently |
-| **Resilience** | Events persist in Kafka if worker is down |
-| **Observability** | Full trace visibility from API to DB |
+| Benefit                        | Description                               |
+| ------------------------------ | ----------------------------------------- |
+| **No Data Duplication**  | Only the worker writes to the database    |
+| **Eventual Consistency** | Events are processed asynchronously       |
+| **Scalability**          | Worker can be scaled independently        |
+| **Resilience**           | Events persist in Kafka if worker is down |
+| **Observability**        | Full trace visibility from API to DB      |
 
 ## Components
 
@@ -86,11 +87,13 @@ The application uses an event-driven architecture where the API only publishes e
 **Location:** `backend/src/lib/tracing.ts`
 
 **Features:**
+
 - OpenTelemetry tracing with auto-instrumentation
 - Pyroscope continuous profiling
 - Custom Prometheus metrics
 
 **Metrics Exposed:**
+
 - `books_created_total` - Counter for books created
 - `books_updated_total` - Counter for books updated
 - `books_deleted_total` - Counter for books deleted
@@ -98,6 +101,7 @@ The application uses an event-driven architecture where the API only publishes e
 - `database_query_duration_seconds` - Database query duration histogram
 
 **Environment Variables:**
+
 ```yaml
 OTEL_EXPORTER_OTLP_ENDPOINT: "http://grafana-alloy:4317"
 OTEL_SERVICE_NAME: "bookmanagement-backend"
@@ -111,6 +115,7 @@ PYROSCOPE_APP_NAME: "bookmanagement-backend"
 **Location:** `frontend/src/components/frontend-observability.tsx`
 
 **Features:**
+
 - Grafana Faro SDK integration
 - Core Web Vitals tracking
 - Frontend error tracking
@@ -118,6 +123,7 @@ PYROSCOPE_APP_NAME: "bookmanagement-backend"
 - Distributed tracing (e2e)
 
 **Environment Variables:**
+
 ```yaml
 NEXT_PUBLIC_FARO_URL: "https://faro-collector-prod-ap-southeast-1.grafana.net/collect/xxx"
 NEXT_PUBLIC_FARO_APP_NAME: "bookmanagement-frontend"
@@ -128,6 +134,7 @@ NEXT_PUBLIC_FARO_APP_NAME: "bookmanagement-frontend"
 **Location:** `k8s/grafana-alloy-config.yaml`
 
 **Features:**
+
 - OTLP receiver for traces and metrics (gRPC: 4317, HTTP: 4318)
 - Loki source for Kubernetes log collection
 - Pyroscope receiver for profiles (port 9999)
@@ -136,12 +143,13 @@ NEXT_PUBLIC_FARO_APP_NAME: "bookmanagement-frontend"
 - Beyla eBPF auto-instrumentation for traces
 
 **Ports:**
-| Port | Protocol | Purpose |
-|------|----------|---------|
-| 12345 | HTTP | Alloy metrics |
-| 4317 | gRPC | OTLP traces/metrics |
-| 4318 | HTTP | OTLP traces/metrics |
-| 9999 | HTTP | Pyroscope profiles |
+
+| Port  | Protocol | Purpose             |
+| ----- | -------- | ------------------- |
+| 12345 | HTTP     | Alloy metrics       |
+| 4317  | gRPC     | OTLP traces/metrics |
+| 4318  | HTTP     | OTLP traces/metrics |
+| 9999  | HTTP     | Pyroscope profiles  |
 
 ### 4. Grafana Beyla (eBPF Auto-instrumentation)
 
@@ -172,22 +180,22 @@ Beyla uses **eBPF (Extended Berkeley Packet Filter)** technology to intercept sy
 
 #### What Beyla Captures
 
-| Data | Description |
-|------|-------------|
-| **HTTP Traces** | Request/response timing, method, path, status codes |
-| **Service Latency** | Time spent in the application vs. network |
-| **Error Rates** | HTTP error status codes (4xx, 5xx) |
-| **Throughput** | Requests per second per service |
-| **Kubernetes Metadata** | Pod, deployment, namespace, node info |
+| Data                          | Description                                         |
+| ----------------------------- | --------------------------------------------------- |
+| **HTTP Traces**         | Request/response timing, method, path, status codes |
+| **Service Latency**     | Time spent in the application vs. network           |
+| **Error Rates**         | HTTP error status codes (4xx, 5xx)                  |
+| **Throughput**          | Requests per second per service                     |
+| **Kubernetes Metadata** | Pod, deployment, namespace, node info               |
 
 #### Benefits Over Manual Instrumentation
 
-| Aspect | OpenTelemetry (Manual) | Beyla (eBPF) |
-|--------|------------------------|--------------|
-| **Setup** | Code changes required | Zero code changes |
-| **Coverage** | Only instrumented routes | All HTTP traffic |
-| **Infrastructure** | Database calls, queue ops | Network only |
-| **Overhead** | Application-level | Kernel-level (lower) |
+| Aspect                   | OpenTelemetry (Manual)    | Beyla (eBPF)         |
+| ------------------------ | ------------------------- | -------------------- |
+| **Setup**          | Code changes required     | Zero code changes    |
+| **Coverage**       | Only instrumented routes  | All HTTP traffic     |
+| **Infrastructure** | Database calls, queue ops | Network only         |
+| **Overhead**       | Application-level         | Kernel-level (lower) |
 
 #### Dual Tracing: OpenTelemetry + Beyla
 
@@ -250,20 +258,22 @@ beyla.ebpf "default" {
 
 Beyla requires elevated permissions to function:
 
-| Permission | Reason |
-|------------|--------|
-| `hostPID: true` | Access all processes on the node |
-| `privileged: true` | Load eBPF programs into kernel |
-| `SYS_ADMIN` capability | Create BPF maps and programs |
-| `SYS_PTRACE` capability | Read process information |
+| Permission                | Reason                           |
+| ------------------------- | -------------------------------- |
+| `hostPID: true`         | Access all processes on the node |
+| `privileged: true`      | Load eBPF programs into kernel   |
+| `SYS_ADMIN` capability  | Create BPF maps and programs     |
+| `SYS_PTRACE` capability | Read process information         |
 
 #### Viewing Beyla Traces
 
 In Grafana Tempo, search for traces with:
+
 - Service name: `bookmanagement-backend`
 - Or search all traces and filter by `k8s.namespace.name = bookmanagement`
 
 The Beyla traces will have additional attributes like:
+
 - `http.request.method`
 - `http.response.status_code`
 - `k8s.pod.name`
@@ -272,10 +282,12 @@ The Beyla traces will have additional attributes like:
 ### 5. Database Observability
 
 **Components:**
+
 - `postgres_exporter` - Metrics collection
 - Database Observability (db-oiy) - Query-level telemetry
 
 **Collected:**
+
 - Query execution times
 - Query samples
 - Schema details
@@ -317,15 +329,15 @@ The application uses Kafka for event-driven architecture. When books are created
 
 #### Kubernetes Deployments
 
-| Deployment | Purpose |
-|------------|---------|
-| `backend` | API server - produces Kafka events only |
+| Deployment         | Purpose                                   |
+| ------------------ | ----------------------------------------- |
+| `backend`        | API server - produces Kafka events only   |
 | `backend-worker` | Worker - consumes events and writes to DB |
 
 #### Kafka Topics
 
-| Topic | Description |
-|-------|-------------|
+| Topic           | Description                |
+| --------------- | -------------------------- |
 | `book-events` | Book CRUD operation events |
 
 #### Event Schema
@@ -367,20 +379,22 @@ The backend and worker have OpenTelemetry instrumentation for Kafka operations.
 
 #### Traces Captured
 
-| Component | Span Name | Attributes |
-|-----------|-----------|------------|
-| **Backend** | `kafka.producer.send` | `messaging.system`, `messaging.destination`, `messaging.operation` |
-| **Worker** | `kafka.consumer.process` | `messaging.kafka.topic`, `messaging.kafka.event_type`, `messaging.kafka.book_id` |
+| Component         | Span Name                  | Attributes                                                                             |
+| ----------------- | -------------------------- | -------------------------------------------------------------------------------------- |
+| **Backend** | `kafka.producer.send`    | `messaging.system`, `messaging.destination`, `messaging.operation`               |
+| **Worker**  | `kafka.consumer.process` | `messaging.kafka.topic`, `messaging.kafka.event_type`, `messaging.kafka.book_id` |
 
 #### Viewing Kafka Traces in Grafana
 
 In Grafana Tempo, search for traces with:
+
 - Service name: `bookmanagement-backend` or `bookmanagement-worker`
 - Span name: `kafka.producer.send` or `kafka.consumer.process`
 
 #### Trace Attributes
 
 The Kafka spans include:
+
 ```json
 {
   "messaging.system": "kafka",
@@ -395,6 +409,7 @@ The Kafka spans include:
 #### End-to-End Trace Flow
 
 When a book is created:
+
 ```
 1. Frontend (HTTP) ──────────────────▶ Backend API
                                          │
@@ -432,24 +447,24 @@ Grafana Alloy collects Kafka metrics by scraping the Kafka Exporter.
 
 The Kafka Exporter provides comprehensive metrics:
 
-| Metric | Description |
-|--------|-------------|
-| **Consumer Group Metrics** | |
-| `kafka_consumergroup_lag` | Consumer lag (messages behind) |
-| `kafka_consumergroup_offset` | Current offset for consumer group |
-| `kafka_consumergroup_members` | Number of consumers in group |
-| **Topic Metrics** | |
-| `kafka_topic_partitions` | Number of partitions per topic |
-| `kafka_topic_partition_current_offset` | Current offset per partition |
-| `kafka_topic_partition_oldest_offset` | Oldest offset (start of topic) |
-| `kafka_topic_partition_replicas` | Number of replicas |
-| `kafka_topic_partition_leader` | Leader broker ID |
-| **Broker Metrics** | |
-| `kafka_broker_info` | Broker metadata |
-| `kafka_broker_topic_partitions` | Partitions per broker |
-| **Message Metrics** | |
-| `kafka_topic_messages_in_total` | Total messages per topic |
-| `kafka_server_brokertopicmetrics_messages_in_per_sec` | Messages per second |
+| Metric                                                  | Description                       |
+| ------------------------------------------------------- | --------------------------------- |
+| **Consumer Group Metrics**                        |                                   |
+| `kafka_consumergroup_lag`                             | Consumer lag (messages behind)    |
+| `kafka_consumergroup_offset`                          | Current offset for consumer group |
+| `kafka_consumergroup_members`                         | Number of consumers in group      |
+| **Topic Metrics**                                 |                                   |
+| `kafka_topic_partitions`                              | Number of partitions per topic    |
+| `kafka_topic_partition_current_offset`                | Current offset per partition      |
+| `kafka_topic_partition_oldest_offset`                 | Oldest offset (start of topic)    |
+| `kafka_topic_partition_replicas`                      | Number of replicas                |
+| `kafka_topic_partition_leader`                        | Leader broker ID                  |
+| **Broker Metrics**                                |                                   |
+| `kafka_broker_info`                                   | Broker metadata                   |
+| `kafka_broker_topic_partitions`                       | Partitions per broker             |
+| **Message Metrics**                               |                                   |
+| `kafka_topic_messages_in_total`                       | Total messages per topic          |
+| `kafka_server_brokertopicmetrics_messages_in_per_sec` | Messages per second               |
 
 #### Configuration
 
@@ -470,11 +485,13 @@ prometheus.scrape "kafka_exporter" {
 #### Key Queries for Monitoring
 
 **Check Consumer Lag (for your worker):**
+
 ```promql
 kafka_consumergroup_lag{consumergroup="bookmanagement-worker-group"}
 ```
 
 **Check Book Events Topic Health:**
+
 ```promql
 # Messages in the topic
 kafka_topic_messages_in_total{topic="book-events"}
@@ -487,6 +504,7 @@ kafka_topic_partition_current_offset{topic="book-events"}
 ```
 
 **Check Consumer Processing:**
+
 ```promql
 # Consumer offset vs latest
 kafka_consumergroup_lag{consumergroup="bookmanagement-worker-group", topic="book-events"}
@@ -499,9 +517,7 @@ kafka_consumergroup_offset{consumergroup="bookmanagement-worker-group", topic="b
 
 #### Grafana Dashboard
 
-Import the Strimzi Kafka Dashboard for comprehensive monitoring:
-- Dashboard ID: `24626` (Strimzi Kafka Dashboard with JVM Metrics)
-- Or search for "Strimzi" in Grafana Dashboards
+Now that Grafana offers the AI assistant to help with troubleshooting Grafana issues. We can ask Grafana AI assistant to create a new dashboard that monitors Kafka based on the available metrics that started with `kafka` prefix.
 
 #### Manual Verification
 
@@ -518,21 +534,22 @@ kubectl exec -n kafka deploy/my-cluster-kafka-exporter -- curl localhost:9404/me
 
 ## Kubernetes Resources
 
-| Resource | Purpose |
-|----------|---------|
-| `namespace.yaml` | bookmanagement namespace |
-| `configmap.yaml` | Application configuration (includes Kafka settings) |
-| `grafana-alloy-deployment.yaml` | Alloy collector |
-| `grafana-alloy-config.yaml` | Alloy configuration (includes Kafka monitoring) |
-| `backend-deployment.yaml` | Backend API (Kafka producer only) |
-| `worker-deployment.yaml` | Backend worker (Kafka consumer) |
-| `frontend-deployment.yaml` | Frontend with Faro |
-| `postgres-deployment.yaml` | PostgreSQL with exporter |
-| `kafka-deployment.yaml` | Kafka message broker |
+| Resource                          | Purpose                                             |
+| --------------------------------- | --------------------------------------------------- |
+| `namespace.yaml`                | bookmanagement namespace                            |
+| `configmap.yaml`                | Application configuration (includes Kafka settings) |
+| `grafana-alloy-deployment.yaml` | Alloy collector                                     |
+| `grafana-alloy-config.yaml`     | Alloy configuration (includes Kafka monitoring)     |
+| `backend-deployment.yaml`       | Backend API (Kafka producer only)                   |
+| `worker-deployment.yaml`        | Backend worker (Kafka consumer)                     |
+| `frontend-deployment.yaml`      | Frontend with Faro                                  |
+| `postgres-deployment.yaml`      | PostgreSQL with exporter                            |
+| `kafka-deployment.yaml`         | Kafka message broker                                |
 
 ## Setup
 
 ### Prerequisites
+
 - Kubernetes cluster (minikube, kind, or cloud)
 - Grafana Cloud account with:
   - Loki
@@ -544,6 +561,7 @@ kubectl exec -n kafka deploy/my-cluster-kafka-exporter -- curl localhost:9404/me
 ### Deploy
 
 1. Apply Kubernetes manifests:
+
 ```bash
 kubectl apply -f k8s/namespace.yaml
 kubectl apply -f k8s/configmap.yaml
@@ -556,6 +574,7 @@ kubectl apply -f k8s/postgres-deployment.yaml
 ```
 
 2. Create secret (or use secret.example.yaml):
+
 ```bash
 kubectl apply -f k8s/secret.example.yaml
 ```
@@ -583,32 +602,36 @@ kubectl logs -n bookmanagement deploy/backend | grep -i "otel\|pyroscope"
 
 ### Accessing Observability Data
 
-| Data Type | Grafana Cloud Service |
-|-----------|---------------------|
-| Logs | Loki - `/{stack-name}/explore` |
-| Traces | Tempo - `/{stack-name}/explore` |
-| Profiles | Pyroscope - `/{stack-name}/profiles` |
-| Metrics | Prometheus - `/{stack-name}/explore` |
-| Frontend | Frontend Cloud - `/{stack-name}/frontend` |
+| Data Type | Grafana Cloud Service                      |
+| --------- | ------------------------------------------ |
+| Logs      | Loki -`/{stack-name}/explore`            |
+| Traces    | Tempo -`/{stack-name}/explore`           |
+| Profiles  | Pyroscope -`/{stack-name}/profiles`      |
+| Metrics   | Prometheus -`/{stack-name}/explore`      |
+| Frontend  | Frontend Cloud -`/{stack-name}/frontend` |
 
 ### Key Queries
 
 **Backend Logs:**
+
 ```logql
 {app="bookmanagement", container="backend"}
 ```
 
 **Backend Traces:**
+
 ```promql
 service_name="bookmanagement-backend"
 ```
 
 **CPU Profiles:**
+
 ```pyroscope
 bookmanagement-backend{cpu=true}
 ```
 
 **Database Query Latency:**
+
 ```promql
 rate(pg_stat_database_tup_fetched_total[5m])
 ```
@@ -616,19 +639,23 @@ rate(pg_stat_database_tup_fetched_total[5m])
 ## Troubleshooting
 
 ### No Logs in Grafana
+
 1. Check pod labels include `app.k8s.io/name: bookmanagement`
 2. Verify Alloy is running: `kubectl get pods -n bookmanagement`
 3. Check Alloy logs: `kubectl logs -n bookmanagement deploy/grafana-alloy`
 
 ### No Traces
+
 1. Verify OTLP endpoint: `http://grafana-alloy:4317`
 2. Check backend logs for "OpenTelemetry initialized"
 
 ### No Profiles
+
 1. Verify Pyroscope URL: `http://grafana-alloy:9999`
 2. Check Alloy logs for pyroscope errors
 
 ### Beyla Traces Not Appearing
+
 1. Verify Alloy has hostPID and privileged security context:
    ```bash
    kubectl get deployment grafana-alloy -n bookmanagement -o jsonpath='{.spec.template.spec.hostPID}'
@@ -650,34 +677,38 @@ rate(pg_stat_database_tup_fetched_total[5m])
 ### Kafka Issues
 
 #### Events Not Being Processed
+
 1. Check worker is running:
+
    ```bash
    kubectl get pods -n bookmanagement | grep worker
    ```
-
 2. Check worker logs for errors:
+
    ```bash
    kubectl logs -n bookmanagement deployment/backend-worker
    ```
-
 3. Check Kafka broker connectivity:
+
    ```bash
    kubectl exec -n bookmanagement deploy/backend -- nslookup my-cluster-kafka-bootstrap.kafka.svc.cluster.local
    ```
-
 4. Check Kafka topic has messages:
+
    ```bash
    # Using Kafka Exporter metrics
    kubectl exec -n kafka deploy/my-cluster-kafka-exporter -- curl localhost:9404/metrics | grep book-events
    ```
 
 #### Consumer Lag Growing
+
 1. Check consumer lag in Grafana:
+
    ```promql
    kafka_consumergroup_lag{consumergroup="bookmanagement-worker-group"}
    ```
-
 2. Check worker is keeping up with messages:
+
    ```bash
    # Compare current offset vs processed
    kafka_topic_partition_current_offset{topic="book-events"} 
@@ -686,27 +717,32 @@ rate(pg_stat_database_tup_fetched_total[5m])
    ```
 
 #### No Kafka Metrics in Grafana
+
 1. Check Kafka Exporter is running:
+
    ```bash
    kubectl get pods -n kafka | grep kafka-exporter
    ```
-
 2. Check Alloy is scraping Kafka Exporter:
+
    ```bash
    kubectl logs -n bookmanagement deploy/grafana-alloy | grep kafka_exporter
    ```
-
 3. Verify metrics endpoint:
+
    ```bash
    kubectl exec -n kafka deploy/my-cluster-kafka-exporter -- curl localhost:9404/metrics | head -10
    ```
 
 #### Duplicate Data Issues
+
 This architecture prevents duplicates by having only the worker write to the database. If you see duplicates:
+
 1. Check that `KAFKA_CONSUMER_ENABLED=false` in backend deployment
 2. Verify worker is the only consumer of `book-events` topic
 
 ### Authentication Errors (401)
+
 1. Verify Grafana Cloud tokens in secret
 2. Check PYROSCOPE_AUTH_TOKEN is valid
 3. Ensure GRAFANA_CLOUD_TOKEN is set
