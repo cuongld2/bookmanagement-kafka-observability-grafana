@@ -1,0 +1,25 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: bookmanagement-config
+  namespace: bookmanagement
+data:
+  DB_HOST: postgres
+  DB_PORT: "5432"
+  DB_NAME: bookmanagement
+  DB_USER: postgres
+  BACKEND_PORT: "3001"
+  FRONTEND_URL: "http://frontend-service:3000"
+  # Kafka Configuration
+  KAFKA_BROKER: "my-cluster-kafka-bootstrap.kafka.svc.cluster.local:9092"
+  KAFKA_ENABLED: "true"
+  KAFKA_CONSUMER_ENABLED: "false"
+  # Observability Configuration
+  OTEL_EXPORTER_OTLP_ENDPOINT: "http://grafana-alloy:4317"
+  OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: "http://grafana-alloy:4317"
+  OTEL_EXPORTER_OTLP_METRICS_ENDPOINT: "http://grafana-alloy:4317"
+  OTEL_SERVICE_NAME: "bookmanagement-backend"
+  OTEL_SERVICE_VERSION: "1.0.0"
+  # Pyroscope Profiling - using Alloy endpoint
+  PYROSCOPE_URL: "http://grafana-alloy:9999"
+  PYROSCOPE_APP_NAME: "bookmanagement-backend"

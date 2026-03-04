@@ -1,0 +1,99 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: backend-worker
+  namespace: bookmanagement
+  labels:
+    app: backend-worker
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: backend-worker
+  template:
+    metadata:
+      labels:
+        app: backend-worker
+        app.k8s.io/name: bookmanagement
+        app.kubernetes.io/name: bookmanagement
+        app.kubernetes.io/instance: bookmanagement-worker
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "3001"
+        prometheus.io/path: "/metrics"
+    spec:
+      containers:
+      - name: backend-worker
+        image: bookmanagement-backend:latest
+        imagePullPolicy: Never
+        command: ["node", "dist/main.worker.js"]
+        env:
+        # Database Configuration
+        - name: DB_HOST
+          valueFrom:
+            configMapKeyRef:
+              name: bookmanagement-config
+              key: DB_HOST
+        - name: DB_PORT
+          valueFrom:
+            configMapKeyRef:
+              name: bookmanagement-config
+              key: DB_PORT
+        - name: DB_NAME
+          valueFrom:
+            configMapKeyRef:
+              name: bookmanagement-config
+              key: DB_NAME
+        - name: DB_USER
+          valueFrom:
+            configMapKeyRef:
+              name: bookmanagement-config
+              key: DB_USER
+        - name: DB_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: bookmanagement-secret
+              key: DB_PASSWORD
+        - name: DATABASE_URL
+          valueFrom:
+            secretKeyRef:
+              name: bookmanagement-secret
+              key: DATABASE_URL
+        # Kafka Configuration
+        - name: KAFKA_BROKER
+          valueFrom:
+            configMapKeyRef:
+              name: bookmanagement-config
+              key: KAFKA_BROKER
+        - name: KAFKA_ENABLED
+          valueFrom:
+            configMapKeyRef:
+              name: bookmanagement-config
+              key: KAFKA_ENABLED
+        # OpenTelemetry Configuration
+        - name: OTEL_EXPORTER_OTLP_ENDPOINT
+          valueFrom:
+            configMapKeyRef:
+              name: bookmanagement-config
+              key: OTEL_EXPORTER_OTLP_ENDPOINT
+        - name: OTEL_EXPORTER_OTLP_TRACES_ENDPOINT
+          valueFrom:
+            configMapKeyRef:
+              name: bookmanagement-config
+              key: OTEL_EXPORTER_OTLP_TRACES_ENDPOINT
+        - name: OTEL_SERVICE_NAME
+          value: "bookmanagement-worker"
+        - name: OTEL_SERVICE_VERSION
+          valueFrom:
+            configMapKeyRef:
+              name: bookmanagement-config
+              key: OTEL_SERVICE_VERSION
+        - name: PYROSCOPE_APP_NAME
+          value: "bookmanagement-worker"
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "100m"
+          limits:
+            memory: "512Mi"
+            cpu: "500m"

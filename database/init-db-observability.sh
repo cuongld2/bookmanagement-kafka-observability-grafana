@@ -1,0 +1,162 @@
+#!/bin/bash
+set -e
+
+# Script to initialize PostgreSQL for Grafana Cloud Database Observability
+# This script enables the pg_stat_statements extension and creates the db-o11y user
+# with appropriate permissions for database monitoring.
+# See https://grafana.com/docs/grafana-cloud/monitor-applications/database-observability/get-started/postgres/
+
+echo "Initializing Database Observability setup..."
+
+# PostgreSQL admin user (used to create the monitoring user and grant permissions)
+POSTGRES_USER="${POSTGRES_USER:-postgres}"
+
+# Monitoring user configuration - should be overridden via environment variables
+DB_O11Y_USER="${DB_O11Y_USER:-db-o11y}"
+DB_O11Y_PASSWORD="${DB_O11Y_PASSWORD:-db-o11y-password}"
+
+# Array of DB_O11Y_DATABASES to configure (default to POSTGRES_DB if not specified)
+DB_O11Y_DATABASES="${DB_O11Y_DATABASES:-bookmanagement}"
+
+echo "Configuring DB_O11Y_DATABASES: $DB_O11Y_DATABASES"
+echo "Monitoring user: $DB_O11Y_USER"
+
+# Enable pg_stat_statements for each database
+setup_database() {
+    local db=$1
+    echo "Setting up database: $db"
+    
+    # Enable pg_stat_statements extension
+    psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$db" <<-EOSQL
+        -- Enable pg_stat_statements extension
+        CREATE EXTENSION IF NOT EXISTS pg_stat_statements;
+        
+        -- Verify extension is installed
+        SELECT * FROM pg_extension WHERE extname = 'pg_stat_statements';
+EOSQL
+    
+    echo "✓ pg_stat_statements extension enabled for database: $db"
+}
+
+# Create the db-o11y user (only once, not per database)
+# reate a monitoring user and grant required privileges
+echo "Creating $DB_O11Y_USER user..."
+psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "postgres" <<-EOSQL
+    -- Create user if it doesn't exist
+    DO \$\$
+    BEGIN
+        IF NOT EXISTS (SELECT FROM pg_catalog.pg_user WHERE usename = '$DB_O11Y_USER') THEN
+            CREATE USER "$DB_O11Y_USER" WITH PASSWORD '$DB_O11Y_PASSWORD';
+            RAISE NOTICE 'User $DB_O11Y_USER created';
+        ELSE
+            RAISE NOTICE 'User $DB_O11Y_USER already exists';
+        END IF;
+    END
+    \$\$;
+    
+    -- Grant base monitoring privileges
+    GRANT pg_monitor TO "$DB_O11Y_USER";
+    GRANT pg_read_all_stats TO "$DB_O11Y_USER";
+
+    -- Grant object privileges for detailed data
+    GRANT pg_read_all_data TO "$DB_O11Y_USER";
+
+    -- Disable pg_stat_statements tracking for this user
+    ALTER ROLE "$DB_O11Y_USER" SET pg_stat_statements.track = 'none';
+EOSQL
+
+echo "✓ User $DB_O11Y_USER created with base privileges"
+
+# Configure each database
+for db in $DB_O11Y_DATABASES; do
+    setup_database "$db"
+done
+
+# Create application tables in each database
+setup_application_tables() {
+    local db=$1
+    echo "Setting up application tables in database: $db"
+    
+    # Create application tables
+    psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$db" <<-EOSQL
+-- Initialize database tables for book management application
+-- This script creates the necessary tables if they don't exist
+
+-- Create books table
+CREATE TABLE IF NOT EXISTS book (
+    id SERIAL PRIMARY KEY,
+    title VARCHAR(255) NOT NULL,
+    author VARCHAR(255) NOT NULL,
+    "publishedYear" INTEGER,
+    genre VARCHAR(255),
+    description TEXT
+);
+
+-- Create index on title for better search performance
+CREATE INDEX IF NOT EXISTS idx_book_title ON book (title);
+
+-- Create index on author for better search performance
+CREATE INDEX IF NOT EXISTS idx_book_author ON book (author);
+
+-- Create index on genre for filtering
+CREATE INDEX IF NOT EXISTS idx_book_genre ON book (genre);
+
+-- Create quotes table
+CREATE TABLE IF NOT EXISTS quote (
+    id SERIAL PRIMARY KEY,
+    text TEXT NOT NULL,
+    author VARCHAR(255)
+);
+
+-- Insert some sample quotes
+INSERT INTO quote (text, author) VALUES
+('Books are the plane, and the train, and the road. They are the destination, and the journey.', 'Anna Quindlen'),
+('A reader lives a thousand lives before he dies. The man who never reads lives only one.', 'George R.R. Martin'),
+('Reading is a discount ticket to everywhere.', 'Mary Schmich'),
+('Books are a uniquely portable magic.', 'Stephen King'),
+('The more that you read, the more things you will know. The more that you learn, the more places you''ll go.', 'Dr. Seuss'),
+('A book is a dream that you hold in your hand.', 'Neil Gaiman'),
+('Reading gives us someplace to go when we have to stay where we are.', 'Mason Cooley'),
+('Books are mirrors: you only see in them what you already have inside you.', 'Carlos Ruiz Zafón'),
+('The world was hers for the reading.', 'Betty Smith'),
+('Reading is an exercise in empathy; an exercise in walking in someone else''s shoes for a while.', 'Malorie Blackman');
+EOSQL
+    
+    echo "✓ Application tables created in database: $db"
+}
+
+# Set up application tables in each database
+for db in $DB_O11Y_DATABASES; do
+    setup_application_tables "$db"
+done
+
+# Configure shared_preload_libraries for pg_stat_statements
+echo "Configuring shared_preload_libraries for pg_stat_statements..."
+psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-EOSQL
+  ALTER SYSTEM SET shared_preload_libraries = 'pg_stat_statements';
+  ALTER SYSTEM SET pg_stat_statements.track = 'all';
+  ALTER SYSTEM SET pg_stat_statements.max = 10000;
+  ALTER SYSTEM SET pg_stat_statements.track_utility = on;
+  ALTER SYSTEM SET log_statement = 'all';
+  ALTER SYSTEM SET log_min_duration_statement = 1000;
+EOSQL
+echo "✓ PostgreSQL configuration updated for pg_stat_statements"
+
+# Reload configuration
+echo "Reloading PostgreSQL configuration..."
+psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" -c "SELECT pg_reload_conf();"
+echo "✓ PostgreSQL configuration reloaded"
+
+echo ""
+echo "✓ Database Observability setup completed successfully!"
+echo ""
+echo "Configuration summary:"
+echo "  - User: $DB_O11Y_USER"
+echo "  - DB_O11Y_DATABASES configured: $DB_O11Y_DATABASES"
+echo "  - Extensions: pg_stat_statements"
+echo ""
+echo "Connection string for $DB_O11Y_USER user:"
+for db in $DB_O11Y_DATABASES; do
+    echo "  postgresql://$DB_O11Y_USER:${DB_O11Y_PASSWORD}@localhost:5432/$db"
+done
+echo ""

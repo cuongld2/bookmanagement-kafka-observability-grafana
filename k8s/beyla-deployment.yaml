@@ -1,0 +1,112 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: beyla
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: beyla
+  namespace: beyla
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: beyla
+rules:
+  - apiGroups: [""]
+    resources: ["pods", "namespaces", "services", "endpoints", "nodes"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["apps"]
+    resources: ["deployments", "replicasets", "statefulsets", "daemonsets"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["kafka.strimzi.io"]
+    resources: ["kafkas", "kafkatopics", "kafkausers"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: beyla
+subjects:
+  - kind: ServiceAccount
+    name: beyla
+    namespace: beyla
+roleRef:
+  kind: ClusterRole
+  name: beyla
+  apiGroup: rbac.authorization.k8s.io
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: beyla-config
+  namespace: beyla
+data:
+  beyla.yml: |
+    beyla:
+      namespace: beyla
+    otel_traces_export:
+      endpoint: http://grafana-alloy.bookmanagement.svc.cluster.local:4317
+      insecure: true
+    attributes:
+      kubernetes:
+        enable: true
+    discovery:
+      instrument:
+        - open_ports: "3001,5432,9092"
+    kubernetes:
+      informers:
+        namespace:
+          own: beyla
+          ignore: true
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: beyla
+  namespace: beyla
+  labels:
+    app: beyla
+spec:
+  selector:
+    matchLabels:
+      app: beyla
+  template:
+    metadata:
+      labels:
+        app: beyla
+    spec:
+      serviceAccountName: beyla
+      hostNetwork: true
+      hostPID: true
+      dnsPolicy: ClusterFirstWithHostNet
+      containers:
+        - name: beyla
+          image: grafana/beyla:latest
+          imagePullPolicy: IfNotPresent
+          args:
+            - --config=/etc/beyla/beyla.yml
+          securityContext:
+            capabilities:
+              add:
+                - SYS_ADMIN
+                - SYS_PTRACE
+                - SYS_RESOURCE
+                - IPC_LOCK
+            privileged: true
+            runAsUser: 0
+          volumeMounts:
+            - name: beyla-config
+              mountPath: /etc/beyla
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 1000m
+              memory: 512Mi
+      volumes:
+        - name: beyla-config
+          configMap:
+            name: beyla-config

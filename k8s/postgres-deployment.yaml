@@ -1,0 +1,104 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: postgres
+  namespace: bookmanagement
+  labels:
+    app: postgres
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: postgres
+  template:
+    metadata:
+      labels:
+        app: postgres
+    spec:
+      containers:
+      - name: postgres
+        image: postgres:15-alpine
+        ports:
+        - containerPort: 5432
+        env:
+        - name: POSTGRES_DB
+          value: bookmanagement
+        - name: POSTGRES_USER
+          value: postgres
+        - name: POSTGRES_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: bookmanagement-secret
+              key: DB_PASSWORD
+        - name: POSTGRES_SHARED_PRELOAD_LIBRARIES
+          value: "pg_stat_statements"
+        - name: POSTGRES_LOG_STATEMENT
+          value: "all"
+        - name: POSTGRES_LOG_MIN_DURATION_STATEMENT
+          value: "1000"
+        - name: POSTGRES_INITDB_ARGS
+          value: "--encoding=UTF8"
+        command:
+          - docker-entrypoint.sh
+          - postgres
+          - -c
+          - shared_preload_libraries=pg_stat_statements
+          - -c
+          - track_activity_query_size=4096
+          - -c
+          - pg_stat_statements.track=all
+        volumeMounts:
+        - name: init-script
+          mountPath: /docker-entrypoint-initdb.d
+          readOnly: true
+        - name: postgres-storage
+          mountPath: /var/lib/postgresql/data
+        - name: postgres-config
+          mountPath: /var/lib/postgresql/conf.d
+          readOnly: true
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "100m"
+          limits:
+            memory: "512Mi"
+            cpu: "500m"
+        livenessProbe:
+          exec:
+            command:
+            - pg_isready
+            - -U
+            - postgres
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        readinessProbe:
+          exec:
+            command:
+            - pg_isready
+            - -U
+            - postgres
+          initialDelaySeconds: 5
+          periodSeconds: 5
+      volumes:
+      - name: init-script
+        configMap:
+          name: postgres-init-script
+      - name: postgres-storage
+        emptyDir: {}
+      - name: postgres-config
+        configMap:
+          name: postgres-config
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres
+  namespace: bookmanagement
+  labels:
+    app: postgres
+spec:
+  selector:
+    app: postgres
+  ports:
+  - port: 5432
+    targetPort: 5432

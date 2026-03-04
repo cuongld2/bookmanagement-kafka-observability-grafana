@@ -1,0 +1,10 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: bookmanagement
+  labels:
+    name: bookmanagement
+    # Istio injection disabled - using native Kubernetes networking
+    istio-injection: disabled
+    # Cilium is not used - using standard Kubernetes networking
+    # Network policies can be added if needed

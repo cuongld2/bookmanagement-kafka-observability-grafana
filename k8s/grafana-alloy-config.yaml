@@ -1,0 +1,417 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-alloy-config
+  namespace: bookmanagement
+data:
+  config.alloy: |
+    // Import Grafana Cloud configuration module
+    import.git "grafana_cloud" {
+      repository = "https://github.com/grafana/alloy-modules.git"
+      revision = "main"
+      path = "modules/cloud/grafana/cloud/module.alloy"
+      pull_frequency = "0s"
+    }
+    
+    // Get Grafana Cloud stack configuration
+    grafana_cloud.stack "receivers" {
+      stack_name = env("GRAFANA_CLOUD_STACK")
+      token = env("GRAFANA_CLOUD_TOKEN")
+    }
+    
+    // ==========================================
+    // METRICS - Service Discovery for backend and frontend
+    // ==========================================
+    
+    discovery.kubernetes "application_pods" {
+      selectors {
+        label = "app.k8s.io/name"
+        role = "pod"
+      }
+      role = "pod"
+      namespaces {
+        own_namespace = true
+      }
+    }
+    
+    discovery.relabel "application_pods" {
+      rule {
+        target_label = "job"
+        separator = "/"
+        source_labels = [
+          "__meta_kubernetes_namespace",
+          "__meta_kubernetes_pod_label_app_kubernetes_io_instance",
+        ]
+      }
+      rule {
+        target_label = "instance"
+        source_labels = [
+          "__meta_kubernetes_pod_name",
+        ]
+      }
+      rule {
+        target_label = "service_namespace"
+        source_labels = [
+          "__meta_kubernetes_namespace",
+        ]
+      }
+      rule {
+        target_label = "namespace"
+        source_labels = [
+          "__meta_kubernetes_namespace",
+        ]
+      }
+      rule {
+        target_label = "service_name"
+        source_labels = [
+          "__meta_kubernetes_pod_label_app_kubernetes_io_instance",
+        ]
+      }
+      rule {
+        target_label = "deployment_environment"
+        source_labels = [
+          "__meta_kubernetes_pod_label_environment",
+        ]
+      }
+      targets = discovery.kubernetes.application_pods.targets
+    }
+    
+    // Metrics: application pods
+    prometheus.scrape "application_pods" {
+      scrape_interval = "15s"
+      forward_to = [grafana_cloud.stack.receivers.metrics]
+      targets = discovery.relabel.application_pods.output
+    }
+    
+    // Logs: application pods
+    loki.source.kubernetes "application_pods" {
+      forward_to = [grafana_cloud.stack.receivers.logs]
+      targets = discovery.relabel.application_pods.output
+    }
+    
+    // ==========================================
+    // TRACES - OTLP Receiver
+    // ==========================================
+    
+    otelcol.receiver.otlp "default" {
+      grpc { }
+      http { }
+      
+      output {
+        metrics = [otelcol.processor.resourcedetection.default.input]
+        logs    = [otelcol.processor.resourcedetection.default.input]
+        traces  = [otelcol.processor.resourcedetection.default.input]
+      }
+    }
+    
+    otelcol.processor.resourcedetection "default" {
+      detectors = ["env", "system"]
+      
+      system {
+        hostname_sources = ["os"]
+      }
+      
+      output {
+        metrics = [otelcol.processor.transform.drop_unneeded_resource_attributes.input]
+        logs    = [otelcol.processor.transform.drop_unneeded_resource_attributes.input]
+        traces  = [otelcol.processor.transform.drop_unneeded_resource_attributes.input]
+      }
+    }
+    
+    otelcol.processor.transform "drop_unneeded_resource_attributes" {
+      error_mode = "ignore"
+      
+      trace_statements {
+        context    = "resource"
+        statements = [
+          "delete_key(attributes, \"k8s.pod.start_time\")",
+          "delete_key(attributes, \"os.description\")",
+          "delete_key(attributes, \"os.type\")",
+          "delete_key(attributes, \"process.command_args\")",
+          "delete_key(attributes, \"process.executable.path\")",
+          "delete_key(attributes, \"process.pid\")",
+          "delete_key(attributes, \"process.runtime.description\")",
+          "delete_key(attributes, \"process.runtime.name\")",
+          "delete_key(attributes, \"process.runtime.version\")",
+        ]
+      }
+      
+      metric_statements {
+        context    = "resource"
+        statements = [
+          "delete_key(attributes, \"k8s.pod.start_time\")",
+          "delete_key(attributes, \"os.description\")",
+          "delete_key(attributes, \"os.type\")",
+          "delete_key(attributes, \"process.command_args\")",
+          "delete_key(attributes, \"process.executable.path\")",
+          "delete_key(attributes, \"process.pid\")",
+          "delete_key(attributes, \"process.runtime.description\")",
+          "delete_key(attributes, \"process.runtime.name\")",
+          "delete_key(attributes, \"process.runtime.version\")",
+        ]
+      }
+      
+      log_statements {
+        context    = "resource"
+        statements = [
+          "delete_key(attributes, \"k8s.pod.start_time\")",
+          "delete_key(attributes, \"os.description\")",
+          "delete_key(attributes, \"os.type\")",
+          "delete_key(attributes, \"process.command_args\")",
+          "delete_key(attributes, \"process.executable.path\")",
+          "delete_key(attributes, \"process.pid\")",
+          "delete_key(attributes, \"process.runtime.description\")",
+          "delete_key(attributes, \"process.runtime.name\")",
+          "delete_key(attributes, \"process.runtime.version\")",
+        ]
+      }
+      
+      output {
+        metrics = [otelcol.processor.batch.default.input]
+        logs    = [otelcol.processor.batch.default.input]
+        traces  = [
+          otelcol.processor.batch.default.input,
+        ]
+      }
+    }
+    
+    otelcol.processor.batch "default" {
+      output {
+        metrics = [otelcol.exporter.otlphttp.otlpEndpoint.input]
+        logs    = [otelcol.exporter.otlphttp.otlpEndpoint.input]
+        traces  = [otelcol.exporter.otlphttp.otlpEndpoint.input]
+      }
+    }
+    
+    otelcol.auth.basic "otlpEndpoint" {
+      username = grafana_cloud.stack.receivers.info["id"]
+      password = env("GRAFANA_CLOUD_TOKEN")
+    }
+    
+    otelcol.exporter.otlphttp "otlpEndpoint" {
+      client {
+        endpoint = "https://otlp-gateway-"+ grafana_cloud.stack.receivers.info["clusterSlug"] + ".grafana.net/otlp"
+        auth     = otelcol.auth.basic.otlpEndpoint.handler
+      }
+    }
+    
+    // ==========================================
+    // DATABASE OBSERVABILITY - PostgreSQL Metrics Collection
+    // ==========================================
+    
+    // PostgreSQL metrics collection using postgresql.receiver
+    prometheus.exporter.postgres "db_metrics" {
+      data_source_names = [
+        "postgresql://db-o11y:db-o11y-password@postgres.bookmanagement.svc.cluster.local:5432/bookmanagement?sslmode=disable",
+      ]
+      enabled_collectors = [
+        "database",
+        "locks",
+        "stat_bgwriter",
+        "stat_database",
+        "stat_user_tables",
+        "statio_user_tables",
+        "wal",
+        "stat_statements",
+      ]
+      autodiscovery {
+        enabled = true
+      }
+      disable_settings_metrics = false
+    }
+    
+    // Scrape metrics from the postgres exporter
+    prometheus.scrape "postgres_db" {
+      targets = prometheus.exporter.postgres.db_metrics.targets
+      scrape_interval = "15s"
+      forward_to = [grafana_cloud.stack.receivers.metrics]
+    }
+    
+    // ==========================================
+    // DATABASE OBSERVABILITY - DBO11y (Query-level telemetry)
+    // ==========================================
+    
+    database_observability.postgres "bookmanagement" {
+      data_source_name     = "postgresql://db-o11y:db-o11y-password@postgres.bookmanagement.svc.cluster.local:5432/bookmanagement?sslmode=disable"
+      forward_to           = [loki.relabel.database_observability.receiver]
+      targets              = prometheus.exporter.postgres.db_metrics.targets
+      enable_collectors    = ["query_details", "query_samples", "schema_details", "explain_plans"]
+    }
+    
+    loki.relabel "database_observability" {
+      forward_to = [grafana_cloud.stack.receivers.logs]
+      rule {
+        target_label = "job"
+        replacement = "integrations/db-o11y"
+      }
+      rule {
+        target_label = "instance"
+        replacement = "postgres"
+      }
+    }
+    
+    discovery.relabel "database_observability" {
+      targets = database_observability.postgres.bookmanagement.targets
+      rule {
+        target_label = "job"
+        replacement = "integrations/db-o11y"
+      }
+      rule {
+        target_label = "instance"
+        replacement = "postgres"
+      }
+    }
+    
+    prometheus.scrape "database_observability" {
+      targets = discovery.relabel.database_observability.output
+      scrape_interval = "15s"
+      forward_to = [grafana_cloud.stack.receivers.metrics]
+    }
+    
+    // ==========================================
+    // KAFKA METRICS - Comprehensive Kafka Monitoring
+    // ==========================================
+    
+    // Kafka Exporter - provides consumer group, topic, partition, and broker metrics
+    prometheus.scrape "kafka_exporter" {
+      scrape_interval = "15s"
+      targets = [{
+        __address__ = "kafka-exporter.kafka.svc:9404",
+        job = "kafka",
+      }]
+      forward_to = [grafana_cloud.stack.receivers.metrics]
+    }
+    
+    // Discover Kafka broker pods for additional metrics
+    discovery.kubernetes "kafka_brokers" {
+      selectors {
+        label = "strimzi.io/kind"
+        role = "pod"
+      }
+      role = "pod"
+      namespaces {
+        names = ["kafka"]
+      }
+    }
+    
+    // Relabel Kafka broker metrics
+    discovery.relabel "kafka_brokers" {
+      rule {
+        target_label = "job"
+        replacement = "kafka-broker"
+      }
+      rule {
+        target_label = "instance"
+        source_labels = ["__meta_kubernetes_pod_name"]
+      }
+      rule {
+        target_label = "broker_id"
+        regex = ".*-broker-(\\d+)"
+        replacement = "$1"
+        source_labels = ["__meta_kubernetes_pod_name"]
+      }
+      targets = discovery.kubernetes.kafka_brokers.targets
+    }
+    
+    // Discover ZooKeeper pods
+    discovery.kubernetes "zookeeper" {
+      selectors {
+        label = "strimzi.io/name"
+        role = "pod"
+      }
+      role = "pod"
+      namespaces {
+        names = ["kafka"]
+      }
+    }
+    
+    discovery.relabel "zookeeper" {
+      rule {
+        target_label = "job"
+        replacement = "zookeeper"
+      }
+      rule {
+        target_label = "instance"
+        source_labels = ["__meta_kubernetes_pod_name"]
+      }
+      targets = discovery.kubernetes.zookeeper.targets
+    }
+    
+    // ==========================================
+    // BEYLA - eBPF Auto-instrumentation
+    // ==========================================
+    
+    beyla.ebpf "default" {
+      attributes {
+        kubernetes {
+          enable = "true"
+        }
+      }
+      
+      discovery {
+        instrument {
+          kubernetes {
+            namespace = "bookmanagement"
+          }
+        }
+        instrument {
+          kubernetes {
+            namespace = "kafka"
+          }
+        }
+      }
+      
+      metrics {
+        features = [
+          "application",
+        ]
+      }
+      
+      output {
+        traces = [otelcol.exporter.otlphttp.beyla_tempo.input]
+      }
+    }
+    
+    prometheus.scrape "beyla" {
+      targets      = beyla.ebpf.default.targets
+      honor_labels = true
+      forward_to   = [grafana_cloud.stack.receivers.metrics]
+    }
+    
+    otelcol.exporter.otlphttp "beyla_tempo" {
+      client {
+        endpoint = "https://otlp-gateway-"+ grafana_cloud.stack.receivers.info["clusterSlug"] + ".grafana.net/otlp"
+        auth     = otelcol.auth.basic.otlpEndpoint.handler
+      }
+    }
+    
+    // ==========================================
+    // PROFILING - Pyroscope Receiver
+    // ==========================================
+    
+    pyroscope.receive_http "default" {
+      http {
+        listen_address = "0.0.0.0"
+        listen_port    = 9999
+      }
+      forward_to = [pyroscope.write.grafana_cloud.receiver]
+    }
+    
+    pyroscope.write "grafana_cloud" {
+      endpoint {
+        url = env("PYROSCOPE_URL")
+        basic_auth {
+          username = env("PYROSCOPE_USER")
+          password = env("PYROSCOPE_AUTH_TOKEN")
+        }
+      }
+    }
+    
+    // ==========================================
+    // LOGGING
+    // ==========================================
+    
+    logging {
+      level = "info"
+      format = "logfmt"
+    }
